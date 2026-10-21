@@ -1,19 +1,19 @@
 // Edit this list to match the 13 schemes used in your PostMitra app.
 // `id` is stored with each application; `name` is what users and admins see.
 export const SCHEMES = [
-  { id: 'sb',    name: 'Post Office Savings Account (SB)' },
-  { id: 'rd',    name: 'Recurring Deposit (RD)' },
-  { id: 'td1',   name: 'Time Deposit - 1 Year' },
-  { id: 'td2',   name: 'Time Deposit - 2 Year' },
-  { id: 'td3',   name: 'Time Deposit - 3 Year' },
-  { id: 'td5',   name: 'Time Deposit - 5 Year' },
-  { id: 'mis',   name: 'Monthly Income Scheme (MIS)' },
-  { id: 'scss',  name: 'Senior Citizen Savings Scheme (SCSS)' },
-  { id: 'ppf',   name: 'Public Provident Fund (PPF)' },
-  { id: 'nsc',   name: 'National Savings Certificate (NSC)' },
-  { id: 'kvp',   name: 'Kisan Vikas Patra (KVP)' },
-  { id: 'ssy',   name: 'Sukanya Samriddhi Yojana (SSY)' },
-  { id: 'mssc',  name: 'Mahila Samman Savings Certificate (MSSC)' },
+  { id: 'ssy',    name: 'Sukanya Samriddhi Yojana' },
+  { id: 'scss',   name: 'Senior Citizens Savings Scheme' },
+  { id: 'mis',    name: 'Post Office Monthly Income Scheme' },
+  { id: 'ppf',    name: 'Public Provident Fund' },
+  { id: 'nsc',    name: 'National Savings Certificate' },
+  { id: 'kvp',    name: 'Kisan Vikas Patra' },
+  { id: 'rd',     name: 'Post Office Recurring Deposit' },
+  { id: 'td-1yr', name: 'Time Deposit - 1 Year' },
+  { id: 'td-2yr', name: 'Time Deposit - 2 Year' },
+  { id: 'td-3yr', name: 'Time Deposit - 3 Year' },
+  { id: 'td-5yr', name: 'Time Deposit - 5 Year' },
+  { id: 'sb',     name: 'Post Office Savings Account' },
+  { id: 'msc',    name: 'Mahila Samman Savings Certificate' },
 ];
 
 export const DOCUMENTS = ['aadhaar', 'photo', 'address_proof', 'pan', 'age_proof', 'nominee_details'];

@@ -10,7 +10,7 @@ import {
   safeEqual, signToken, verifyToken, signAdminToken, verifyAdminToken, createLimiter, hashPin, verifyPin, randomPin,
 } from './auth.js';
 import {
-  ValidationError, validateApplication, validateMessage, validateAdminUpdate, validateRegister, checkPin, cleanText,
+  ValidationError, normalizePhone, validateApplication, validateMessage, validateAdminUpdate, validateRegister, checkPin, cleanText,
 } from './validate.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -20,7 +20,7 @@ export function createApp(opts = {}) {
   const env = { ...process.env, ...opts };
   const PORT = Number(env.PORT || 4000);
   const DATA_FILE = env.DATA_FILE || path.join(ROOT, 'data', 'db.json');
-  const CORS_ORIGIN = env.CORS_ORIGIN || '';
+  const CORS_ORIGIN = env.CORS_ORIGIN || '*'; // auth uses bearer tokens (no cookies), so open CORS lets the PostMitra site call this API
   const TRUST_PROXY = env.TRUST_PROXY === '1' || env.TRUST_PROXY === 1;
   const STATIC_DIR = env.STATIC_DIR || path.join(ROOT, 'public');
 
@@ -164,8 +164,26 @@ export function createApp(opts = {}) {
     routes.push({ method, re, keys, handler });
   };
 
-  route('GET', '/api/health', async () => ({ ok: true }));
+  route('GET', '/api/health', async (req, _p, url) => {
+    if (url.searchParams.get('deep') !== '1') return { ok: true };
+    try { await store.getUser('0000000000'); return { ok: true, db: 'ok' }; } catch (e) { return { ok: false, db: String(e.message || e).slice(0, 300) }; }
+  });
   route('GET', '/api/schemes', async () => ({ schemes: SCHEMES, documents: DOCUMENTS, statuses: STATUSES }));
+
+  // --- public status lookup: application number + mobile number, no sign-in, no personal data returned ---
+  route('POST', '/api/track', async (req) => {
+    if (!limit(`track:${ip(req)}`, 30, 60 * 60 * 1000)) throw new HttpError(429, 'too_many_requests');
+    const body = await readJson(req);
+    const id = String(body.id || '').trim().toUpperCase();
+    const phone = normalizePhone(body.phone);
+    const app = /^PM-\d{4}-\d{4,}$/.test(id) ? await store.get(id) : null;
+    if (!app || !phone || normalizePhone(app.phone) !== phone) throw new HttpError(404, 'not_found');
+    return { application: {
+      id: app.id, schemeName: SCHEMES.find((x) => x.id === app.scheme)?.name || app.scheme,
+      status: app.status, statusNote: app.statusNote, appointment: app.appointment,
+      history: app.history, createdAt: app.createdAt, updatedAt: app.updatedAt,
+    } };
+  });
 
   // --- applicant accounts ---
   route('POST', '/api/auth/register', async (req) => {
@@ -365,7 +383,8 @@ export function createApp(opts = {}) {
     '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon',
   };
   function serveStatic(req, res, pathname) {
-    const rel = pathname === '/' ? '/index.html' : pathname;
+    let rel = pathname === '/' ? '/index.html' : pathname;
+    if (!path.extname(rel)) rel = '/index.html'; // single-page app routes (local mode; Vercel uses rewrites)
     const file = path.resolve(STATIC_DIR, '.' + decodeURIComponent(rel));
     if (!file.startsWith(path.resolve(STATIC_DIR) + path.sep) || !fs.existsSync(file) || !fs.statSync(file).isFile()) {
       return send(res, 404, { error: 'not_found' });
