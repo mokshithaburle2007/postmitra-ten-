@@ -1,0 +1,14 @@
+{
+  "name": "postmitra",
+  "version": "1.1.0",
+  "private": true,
+  "type": "module",
+  "description": "PostMitra: in-app scheme applications with a two-way admin dashboard (zero runtime dependencies)",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node server/index.js",
+    "build:client": "node scripts/build-client.cjs",
+    "test": "node server/test.js && MODE=supabase node server/test.js",
+    "test:e2e": "node scripts/e2e.cjs"
+  }
+}
