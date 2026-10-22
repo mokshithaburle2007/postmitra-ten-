@@ -10,7 +10,7 @@ import {
   safeEqual, signToken, verifyToken, signAdminToken, verifyAdminToken, createLimiter, hashPin, verifyPin, randomPin,
 } from './auth.js';
 import {
-  ValidationError, normalizePhone, validateApplication, validateMessage, validateAdminUpdate, validateRegister, checkPin, cleanText,
+  ValidationError, normalizePhone, validateApplication, validateMessage, validateAdminUpdate, validateRegister, checkPin, cleanText, validateDocumentUpload, validateDocumentReview, MAX_DOCS,
 } from './validate.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -69,7 +69,7 @@ export function createApp(opts = {}) {
     res.end(data);
   }
 
-  function readJson(req) {
+  function readJson(req, max = 100_000) {
     if (req.body !== undefined && req.body !== null) { // already parsed by the platform
       if (Buffer.isBuffer(req.body)) { try { return Promise.resolve(JSON.parse(req.body.toString('utf8'))); } catch { return Promise.reject(new HttpError(400, 'invalid_json')); } }
       if (typeof req.body === 'string') { try { return Promise.resolve(req.body ? JSON.parse(req.body) : {}); } catch { return Promise.reject(new HttpError(400, 'invalid_json')); } }
@@ -80,7 +80,7 @@ export function createApp(opts = {}) {
       const chunks = [];
       req.on('data', (c) => {
         size += c.length;
-        if (size > 100_000) { reject(new HttpError(413, 'payload_too_large')); req.destroy(); return; }
+        if (size > max) { reject(new HttpError(413, 'payload_too_large')); req.destroy(); return; }
         chunks.push(c);
       });
       req.on('end', () => {
@@ -131,7 +131,7 @@ export function createApp(opts = {}) {
     applicantName: a.applicantName, village: a.village, district: a.district, postOffice: a.postOffice,
     preferredDate: a.preferredDate, depositAmount: a.depositAmount, docsReady: a.docsReady,
     status: a.status, statusNote: a.statusNote, appointment: a.appointment,
-    messages: a.messages, history: a.history, unread: a.unreadUser,
+    messages: a.messages, history: a.history, unread: a.unreadUser, documents: a.documents || [],
     createdAt: a.createdAt, updatedAt: a.updatedAt,
   });
 
@@ -145,6 +145,7 @@ export function createApp(opts = {}) {
     id: a.id, scheme: a.scheme, schemeName: SCHEMES.find((s) => s.id === a.scheme)?.name || a.scheme,
     applicantName: a.applicantName, phone: a.phone, village: a.village, status: a.status,
     unread: a.unreadAdmin, messageCount: a.messages.length,
+    docsCount: (a.documents || []).length, docsPending: (a.documents || []).filter((d) => d.status === 'pending').length,
     lastMessage: a.messages.length ? a.messages[a.messages.length - 1] : null,
     createdAt: a.createdAt, updatedAt: a.updatedAt, preferredDate: a.preferredDate,
     appointmentDate: a.appointment?.date || '',
@@ -251,6 +252,48 @@ export function createApp(opts = {}) {
     };
   });
 
+
+  // --- document uploads (applicant uploads, staff verify) ---
+  const newDocId = () => crypto.randomBytes(6).toString('hex');
+  async function sendFile(app, docId) {
+    const doc = (app.documents || []).find((d) => d.id === docId);
+    const file = doc && await store.getFile(`${app.id}:${doc.id}`);
+    if (!file) throw new HttpError(404, 'not_found');
+    return { raw: Buffer.from(file.content, 'base64'), headers: {
+      'Content-Type': doc.mime, 'Content-Disposition': `inline; filename="${encodeURIComponent(doc.name)}"`,
+      'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'",
+    } };
+  }
+
+  route('POST', '/api/applications/:id/documents', async (req, p) => {
+    const app = await requireOwnedApp(req, p.id);
+    if (['cancelled', 'rejected', 'completed'].includes(app.status)) throw new HttpError(409, 'closed');
+    if (!limit(`upload:${app.userPhone}`, 40, 60 * 60 * 1000)) throw new HttpError(429, 'too_many_requests');
+    const { type, mime, name, buf } = validateDocumentUpload(await readJson(req, 4_200_000));
+    app.documents = app.documents || [];
+    if (app.documents.length >= MAX_DOCS) throw new HttpError(409, 'too_many_documents');
+    const doc = { id: newDocId(), type, name, mime, size: buf.length, status: 'pending', note: '', uploadedAt: new Date().toISOString(), reviewedAt: '' };
+    await store.putFile(`${app.id}:${doc.id}`, mime, buf.toString('base64'));
+    app.documents.push(doc);
+    app.unreadAdmin = true; app.updatedAt = doc.uploadedAt;
+    await store.save(app);
+    return { status: 201, body: { application: publicView(app) } };
+  });
+
+  route('GET', '/api/applications/:id/documents/:docId', async (req, p) => sendFile(await requireOwnedApp(req, p.id), p.docId));
+
+  route('DELETE', '/api/applications/:id/documents/:docId', async (req, p) => {
+    const app = await requireOwnedApp(req, p.id);
+    const doc = (app.documents || []).find((d) => d.id === p.docId);
+    if (!doc) throw new HttpError(404, 'not_found');
+    if (doc.status === 'verified') throw new HttpError(409, 'already_verified');
+    app.documents = app.documents.filter((d) => d.id !== doc.id);
+    await store.deleteFile(`${app.id}:${doc.id}`);
+    app.updatedAt = new Date().toISOString(); app.unreadAdmin = true;
+    await store.save(app);
+    return { application: publicView(app) };
+  });
+
   route('GET', '/api/applications/:id', async (req, p) => {
     const app = await requireOwnedApp(req, p.id);
     const view = publicView(app);
@@ -339,6 +382,20 @@ export function createApp(opts = {}) {
     if (upd.appointment) { app.appointment = upd.appointment; app.unreadUser = true; }
     if (upd.status && (upd.status !== app.status || upd.statusNote !== app.statusNote)) await store.setStatus(app, upd.status, 'admin', upd.statusNote);
     else { app.updatedAt = new Date().toISOString(); await store.save(app); }
+    return { application: adminFull(app) };
+  });
+
+
+  route('GET', '/api/admin/applications/:id/documents/:docId', async (req, p) => sendFile(await adminApp(req, p.id), p.docId));
+
+  route('PATCH', '/api/admin/applications/:id/documents/:docId', async (req, p) => {
+    const app = await adminApp(req, p.id);
+    const doc = (app.documents || []).find((d) => d.id === p.docId);
+    if (!doc) throw new HttpError(404, 'not_found');
+    const r = validateDocumentReview(await readJson(req));
+    doc.status = r.status; doc.note = r.note; doc.reviewedAt = new Date().toISOString();
+    app.unreadUser = true; app.updatedAt = doc.reviewedAt;
+    await store.save(app);
     return { application: adminFull(app) };
   });
 

@@ -5,8 +5,8 @@ import { buildApplication, formatId, applyMessage, applyNote, applyStatus } from
 // JSON-file store for local use. Same async interface as store-supabase.js.
 // (Serverless hosts such as Vercel have no persistent disk: use the Supabase store there.)
 export function createStore(file) {
-  let db = { seq: {}, applications: [], users: {} };
-  if (fs.existsSync(file)) db = { users: {}, ...JSON.parse(fs.readFileSync(file, 'utf8')) };
+  let db = { seq: {}, applications: [], users: {}, files: {} };
+  if (fs.existsSync(file)) db = { users: {}, files: {}, ...JSON.parse(fs.readFileSync(file, 'utf8')) };
   else fs.mkdirSync(path.dirname(file), { recursive: true });
 
   function persist() {
@@ -33,9 +33,13 @@ export function createStore(file) {
     async addMessage(app, from, text) { applyMessage(app, from, text); persist(); },
     async addNote(app, text) { applyNote(app, text); persist(); },
     async setStatus(app, status, by, note) { applyStatus(app, status, by, note); persist(); },
+    async putFile(fileId, mime, content) { db.files[fileId] = { mime, content }; persist(); },
+    async getFile(fileId) { return db.files[fileId] || null; },
+    async deleteFile(fileId) { delete db.files[fileId]; persist(); },
     async remove(id) {
       const i = db.applications.findIndex((a) => a.id === id);
       if (i === -1) return false;
+      for (const k of Object.keys(db.files)) if (k.startsWith(`${id}:`)) delete db.files[k];
       db.applications.splice(i, 1);
       persist();
       return true;

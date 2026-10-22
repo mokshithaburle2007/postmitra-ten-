@@ -138,3 +138,40 @@ export function validateRegister(body) {
   if (Object.keys(errors).length) throw new ValidationError(errors);
   return { name, phone, pin };
 }
+
+// ---- document uploads ----
+export const DOC_TYPES = [...DOCUMENTS, 'other'];
+export const MAX_FILE_BYTES = 2.5 * 1024 * 1024;
+export const MAX_DOCS = 12;
+const MAGIC = {
+  'image/jpeg': (b) => b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff,
+  'image/png': (b) => b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47,
+  'application/pdf': (b) => b.slice(0, 4).toString('latin1') === '%PDF',
+};
+
+export function validateDocumentUpload(body) {
+  const errors = {};
+  const type = DOC_TYPES.includes(body?.type) ? body.type : (errors.type = 'invalid', '');
+  const mime = Object.prototype.hasOwnProperty.call(MAGIC, body?.mime) ? body.mime : (errors.file = 'type', '');
+  const name = cleanText(body?.name, 80).replace(/[\\/<>:"|?*\u0000-\u001F]/g, '_') || 'document';
+  let buf = null;
+  if (typeof body?.data !== 'string' || !body.data) errors.file = errors.file || 'required';
+  else if (body.data.length > Math.ceil(MAX_FILE_BYTES / 3) * 4 + 8) errors.file = 'too_big';
+  else {
+    buf = Buffer.from(body.data, 'base64');
+    if (!buf.length) errors.file = 'required';
+    else if (buf.length > MAX_FILE_BYTES) errors.file = 'too_big';
+    else if (mime && !MAGIC[mime](buf)) errors.file = 'type';
+  }
+  if (Object.keys(errors).length) throw new ValidationError(errors);
+  return { type, mime, name, buf };
+}
+
+export function validateDocumentReview(body) {
+  const errors = {};
+  const status = ['verified', 'rejected'].includes(body?.status) ? body.status : (errors.status = 'invalid', '');
+  const note = cleanText(body?.note, 300);
+  if (status === 'rejected' && !note) errors.note = 'required';
+  if (Object.keys(errors).length) throw new ValidationError(errors);
+  return { status, note };
+}

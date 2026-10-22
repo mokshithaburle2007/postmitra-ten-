@@ -51,7 +51,17 @@ export function createSupabaseStore({ url, key }) {
     async addMessage(app, from, text) { applyMessage(app, from, text); await put(app); },
     async addNote(app, text) { applyNote(app, text); await put(app); },
     async setStatus(app, status, by, note) { applyStatus(app, status, by, note); await put(app); },
+    async putFile(fileId, mime, content) {
+      await rq('POST', '/app_files?on_conflict=id', { id: fileId, app_id: fileId.split(':')[0], mime, content },
+        { Prefer: 'resolution=merge-duplicates,return=minimal' });
+    },
+    async getFile(fileId) {
+      const rows = await rq('GET', `/app_files?id=eq.${encodeURIComponent(fileId)}&select=mime,content&limit=1`);
+      return rows && rows[0] ? rows[0] : null;
+    },
+    async deleteFile(fileId) { await rq('DELETE', `/app_files?id=eq.${encodeURIComponent(fileId)}`); },
     async remove(id) {
+      await rq('DELETE', `/app_files?app_id=eq.${encodeURIComponent(id)}`);
       const rows = await rq('DELETE', `/applications?id=eq.${encodeURIComponent(id)}`, undefined, { Prefer: 'return=representation' });
       return Array.isArray(rows) ? rows.length > 0 : true;
     },
